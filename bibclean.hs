@@ -1,13 +1,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-import Control.Applicative
+module Main where
+
+import Control.Applicative ((<$>), (<*>))
 import Text.BibTeX.Parse (file)
 import Text.BibTeX.Entry
 import Text.BibTeX.Format (entry)
+import Text.Parsec as PS
 import Text.Parsec.String
-import qualified Text.Parsec as PS
 {-import Data.List.Split (splitOn)-}
-import Data.List (foldl')
+import Data.List (foldl', elemIndex)
 import Data.List.Utils (split, replace, join)
 import Data.Char (toLower)
 import qualified Data.Map as Map
@@ -20,11 +22,23 @@ import qualified Data.CSV.Conduit as CSV
 import qualified Data.Vector as V
 import Debug.Trace (trace)
 
+import Authors
+
+data Replace = Split Char [Replace] | Leaf Char String
+
+instance Show Replace where
+    show (Leaf char string) = [char] ++ " :: " ++ string ++ "\n"
+    show (Split char (x:xs)) = [char] ++ (show' 0 1 x) ++ (concatMap (show' 1 1) xs)
+        where
+            show' :: Int -> Int -> Replace -> String
+            show' m n (Leaf char' string) = (replicate m ' ') ++ [char'] ++ " :: " ++ string ++ "\n"
+            show' m n (Split char' (x':xs')) = (replicate m ' ') ++ [char'] ++ (show' 0 (n+1) x') ++ (concatMap (show' (n+1) (n+1)) xs')
+
 main = do
     result <- parseFromFile file "/Users/avashevko/Documents/library.bib"
+    oldres <- parseFromFile file "/Users/avashevko/Documents/library-hs.bib"
     texrepl <- bibtexSwaps
     cleanrepl <- cleanSwaps
-    {-let localProcess = process (foldl (.) id (fieldsfcns texrepl)) (makeId cleanrepl idfields)-}
     let localProcess = process (makeFieldProcessor texrepl procfields) (makeIdProcessor cleanrepl idfields)
     case result of 
         Left err -> print err
@@ -36,6 +50,7 @@ main = do
         idfields = ["author","editor"]
         procfields = ["author","editor","institution","file"]
 
+-- | 
 makeFieldProcessor :: [(String,String)] -> [String] -> (Map.Map String String -> Map.Map String String)
 makeFieldProcessor repls fields = foldl' (.) id fieldProcessors
     where
@@ -44,6 +59,54 @@ makeFieldProcessor repls fields = foldl' (.) id fieldProcessors
 {-swap :: (a,b) -> (b,a)-}
 {-swap (a,b) = (b,a)-}
 
+-- deal with latex mappings
+-- | Return children of a Replace node (leaves return empty lists)
+children :: Replace -> [Replace]
+children (Split char xs) = xs
+children (Leaf char xs) = []
+
+-- | Return the character of a Replace node
+replChar :: Replace -> Char
+replChar (Split char xs) = char
+replChar (Leaf char xs) = char
+
+childChars :: Replace -> String
+childChars node = map replChar (children node)
+
+makeReplaceTree :: [(String, String)] -> Replace
+makeReplaceTree maps = foldl' insertReplaceRoot (Split '.' []) maps
+    where
+        insertReplaceRoot :: Replace -> (String, String) -> Replace
+        insertReplaceRoot tree (from, to) = Split '.' (updateChildren from to (children tree))
+        updateChildren :: String -> String -> [Replace] -> [Replace]
+        updateChildren from@(x:[]) to [] = [Leaf x to]
+        updateChildren from@(x:xs) to [] = [Split x (updateChildren xs to [])]
+        updateChildren from@(x:[]) to (y:ys) | x == (replChar y) = error ("overlapping replacement patterns" ++ [x] ++ " -> " ++ to)
+                                             | otherwise = y:(updateChildren from to ys)
+        updateChildren from@(x:xs) to (y:ys) | x == (replChar y) = (Split (replChar y) (updateChildren xs to (children y))):ys
+                                             | otherwise = y:(updateChildren from to ys)
+
+-- Replace tree based parsers
+parseToReplaceRoot :: Replace -> Parsec String () String
+parseToReplaceRoot root = do
+    pre <- PS.many (noneOf (childChars root))
+    post <- eol <|> (choice (map parseChild' (children root))) <|> continueParse
+    return (pre ++ post)
+    where
+        eol = eof >> return []
+        parseChild' x = (++) <$> (parseChild x) <*> (parseToReplaceRoot root)
+        continueParse = (:) <$> anyChar <*> (parseToReplaceRoot root)
+
+parseChild :: Replace -> Parsec String () String
+parseChild (Leaf x to) = try $ do
+    char x
+    return to
+parseChild (Split x children) = try $ do
+    char x
+    choice (map parseChild children)
+
+-- | Take a map (a's -> b's) and a map (a's -> c's).
+-- Make a map (b's -> c's) by joining b's and c's produced by common a's.
 linkMapping :: [(String, String)] -> [(String, String)] -> [(String, String)]
 linkMapping froms tos = filter (\(a,b) -> a /= b) $ map (match tos) froms
     where
@@ -110,7 +173,6 @@ makeIdProcessor repls idfields fields = idstring -- (fst . head . Map.assocs) fi
         year = Map.lookup "year" fields
 
 pullNames :: String -> String
-{-pullNames x = filter (filt) (map repl ((etal . splitLastNames . splitNames) x))-}
 pullNames x = (etal . shortenNames . splitNames' . splitVerbatim) x
     where
         {-splitNames = split " and "-}
@@ -155,18 +217,4 @@ etal xs | length xs > maxAuthors = join "." ((take truncateTo xs) ++ ["ea"])
     where
         maxAuthors = 2
         truncateTo = 2
-
--- name parser shit
-eol = do {PS.try PS.eof; return []}
-nameEnd = eol PS.<|> PS.try (PS.lookAhead (PS.string " and "))
-
-nameChunk = braceName PS.<|> cleanName
-
-cleanName :: GenParser Char st String
-{-cleanName = PS.manyTill (PS.noneOf "{},") (eol PS.<|> PS.try (PS.lookAhead (PS.string " and ")))-}
-cleanName = PS.manyTill (PS.noneOf "{},") nameEnd
-
-braceName :: GenParser Char st String
-braceName = PS.between (PS.char '{') (PS.char '}') (PS.many $ PS.noneOf "{}")
-
 
