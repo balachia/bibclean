@@ -92,6 +92,7 @@ topLevelComma = do
 topLevelEnd = (eof >> return "") <|> (try (lookAhead (string " and ")) >> return "")
 
 -- author name list is many top level names separated by " and " ending at eof
+authorNames :: Parsec String () [String]
 authorNames = sepBy topLevel (string " and ")
 
 {-topLevelClean :: Parsec String () String-}
