@@ -41,20 +41,43 @@ main = do
     {-texrepl <- bibtexSwaps-}
     {-cleanrepl <- cleanSwaps-}
     bibtexSwapTree' <- bibtexSwapTree
-    let cleanedFields = map (updateField (parseCleaner (parseToReplaceRoot bibtexSwapTree')) rawbib) procfields
+    cleanAuthorF' <- cleanAuthorF
+    let cleanedFields = foldl' (updateField (parseCleaner (parseToReplaceRoot bibtexSwapTree'))) rawbib procfields
+    let cleanedIds = updateId (makeId cleanAuthorF' idfields) cleanedFields
     {-let cleanedFields = map (updateField (parseCleaner bibtexSwapTree') rawbib) procfields-}
     {-let localProcess = process (makeFieldProcessor texrepl procfields) (makeIdProcessor cleanrepl idfields)-}
     {-writeFile "/Users/avashevko/Documents/library-hs.bib" (concat $ map entry $ localProcess rawbib)-}
+    writeFile "/Users/avashevko/Documents/library-clean2.bib" (concatMap entry $ cleanedIds)
     putStrLn "done"
-    return cleanedFields
+    {-return cleanedFields-}
+    return cleanedIds
     where
         bibtexSwaps = linkMapping <$> (loadMapping "latex-crappy.csv") <*> (loadMapping "latex-good.csv")
         cleanSwaps = linkMapping <$> (bibtexSwaps) <*> (loadMapping "latex-short.csv")
         bibtexSwapTree = makeReplaceTree <$> bibtexSwaps
         cleanSwapTree = makeReplaceTree <$> cleanSwaps
+        cleanAuthorF = cleanSwapTree >>= (\tree -> return (charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))
+        {-cleanAuthorF = cleanSwapTree >>= (\tree -> return ((map charCheck) . charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))-}
         {-fieldsfcns repls = map (sanitizeField repls) ["author","editor","institution","file"]-}
         idfields = ["author","editor"]
         procfields = ["author","editor","institution","file"]
+
+charClean :: String -> String
+charClean [] = []
+charClean (x:xs) | Just x' <- repl x = x':(charClean xs)
+                 | Nothing <- repl x = (charClean xs)
+    where
+        repl ' ' = Just '-'
+        repl ',' = Nothing
+        repl '.' = Nothing
+        repl '\'' = Nothing
+        repl c = Just c
+
+charCheck x = if badChar then trace "{BAD}" x else x
+    where
+        badChar = not $ x `elem` (['a'..'z'] ++ ['0'..'9'] ++ ['-'])
+        {-badChar = not $ x `elem` []-}
+
 
 -- | 
 makeFieldProcessor :: [(String,String)] -> [String] -> (Map.Map String String -> Map.Map String String)
@@ -152,9 +175,27 @@ updateField f xs field = map newEntry xs
         update ((a,b):ys) | a == field = (a,f b):ys
                           | otherwise = (a,b):(update ys)
 
+updateId :: (T -> String) -> [T] -> [T]
+updateId f xs = map newEntry xs
+    where
+        newEntry old = Cons {entryType=entryType old, identifier=f old, fields=fields old}
+
 parseCleaner :: Parsec String () String -> String -> String
 parseCleaner parser x = unsafeParseResult $ parse parser "" x
 
+
+-- make id
+{-makeId :: [T] -> [String] -> [String]-}
+makeId :: (String -> String) -> [String] -> T -> String
+makeId cleanf idfields entry = (makeEntryId . fields) entry
+    where
+        idfield entryFields = (cleanAuthors . pullAuthors . fromJust . head) $ filter isJust (map (\f -> lookup f entryFields) idfields)
+        {-pullAuthors = parseCleaner authorNames-}
+        pullAuthors x = unsafeParseResult $ parse authorNames "" x
+        cleanAuthors xs = map cleanf xs
+        year entryFields | Just year' <- lookup "year" entryFields = year'
+                         | otherwise = "XXXX"
+        makeEntryId entryFields = (etal $ idfield entryFields) ++ (year entryFields)
 
 
 
