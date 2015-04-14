@@ -49,14 +49,14 @@ main = do
     writeFile "/Users/avashevko/Documents/library-clean2.bib" (concatMap entry $ cleanedIds)
     putStrLn "done"
     {-return cleanedFields-}
-    return cleanedIds
+    {-return cleanedIds-}
     where
         bibtexSwaps = linkMapping <$> (loadMapping "latex-crappy.csv") <*> (loadMapping "latex-good.csv")
         cleanSwaps = linkMapping <$> (bibtexSwaps) <*> (loadMapping "latex-short.csv")
         bibtexSwapTree = makeReplaceTree <$> bibtexSwaps
         cleanSwapTree = makeReplaceTree <$> cleanSwaps
-        cleanAuthorF = cleanSwapTree >>= (\tree -> return (charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))
-        {-cleanAuthorF = cleanSwapTree >>= (\tree -> return ((map charCheck) . charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))-}
+        {-cleanAuthorF = cleanSwapTree >>= (\tree -> return (charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))-}
+        cleanAuthorF = cleanSwapTree >>= (\tree -> return (charCheck . charClean . (map toLower) . (parseCleaner (parseToReplaceRoot tree))))
         {-fieldsfcns repls = map (sanitizeField repls) ["author","editor","institution","file"]-}
         idfields = ["author","editor"]
         procfields = ["author","editor","institution","file"]
@@ -72,10 +72,11 @@ charClean (x:xs) | Just x' <- repl x = x':(charClean xs)
         repl '\'' = Nothing
         repl c = Just c
 
-charCheck x = if badChar then trace "{BAD}" x else x
+charCheck str = if badChars then trace ("{BAD :: " ++ str ++ "}") str else str
     where
-        badChar = not $ x `elem` (['a'..'z'] ++ ['0'..'9'] ++ ['-'])
-        {-badChar = not $ x `elem` []-}
+        badChar x = not $ x `elem` (['a'..'z'] ++ ['0'..'9'] ++ ['-'])
+        {-badChar x = not $ x `elem` []-}
+        badChars = or (map badChar str)
 
 
 -- | 
