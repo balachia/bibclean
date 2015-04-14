@@ -196,8 +196,8 @@ unicode,latex
 "\u01BA","{\\fontencoding{LELA}\\selectfont\\char195}"
 "\u01C2","\\textdoublepipe "
 "\u01F5","\\'{g}"
-"\u0386","\\'{A}"
-"\u0388","\\'{E}"
+# "\u0386","\\'{A}"
+# "\u0388","\\'{E}"
 "\u0389","\\'{H}"
-"\u03CC","\\'{o}"
+# "\u03CC","\\'{o}"
 
