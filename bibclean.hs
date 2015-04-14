@@ -8,6 +8,7 @@ import Text.BibTeX.Entry
 import Text.BibTeX.Format (entry)
 import Text.Parsec as PS
 import Text.Parsec.String
+import Text.Parsec.Error
 {-import Data.List.Split (splitOn)-}
 import Data.List (foldl', elemIndex)
 import Data.List.Utils (split, replace, join)
@@ -35,17 +36,22 @@ instance Show Replace where
             show' m n (Split char' (x':xs')) = (replicate m ' ') ++ [char'] ++ (show' 0 (n+1) x') ++ (concatMap (show' (n+1) (n+1)) xs')
 
 main = do
-    result <- parseFromFile file "/Users/avashevko/Documents/library.bib"
-    oldres <- parseFromFile file "/Users/avashevko/Documents/library-hs.bib"
-    texrepl <- bibtexSwaps
-    cleanrepl <- cleanSwaps
-    let localProcess = process (makeFieldProcessor texrepl procfields) (makeIdProcessor cleanrepl idfields)
-    case result of 
-        Left err -> print err
-        Right xs -> writeFile "/Users/avashevko/Documents/library-hs.bib" (concat $ map entry $ localProcess xs)
+    rawbib <- (unsafeParseResult <$> (parseFromFile file "/Users/avashevko/Documents/library.bib")) :: IO [T]
+    oldbib <- (unsafeParseResult <$> (parseFromFile file "/Users/avashevko/Documents/library-hs.bib")) :: IO [T]
+    {-texrepl <- bibtexSwaps-}
+    {-cleanrepl <- cleanSwaps-}
+    bibtexSwapTree' <- bibtexSwapTree
+    let cleanedFields = map (updateField (parseCleaner (parseToReplaceRoot bibtexSwapTree')) rawbib) procfields
+    {-let cleanedFields = map (updateField (parseCleaner bibtexSwapTree') rawbib) procfields-}
+    {-let localProcess = process (makeFieldProcessor texrepl procfields) (makeIdProcessor cleanrepl idfields)-}
+    {-writeFile "/Users/avashevko/Documents/library-hs.bib" (concat $ map entry $ localProcess rawbib)-}
+    putStrLn "done"
+    return cleanedFields
     where
         bibtexSwaps = linkMapping <$> (loadMapping "latex-crappy.csv") <*> (loadMapping "latex-good.csv")
         cleanSwaps = linkMapping <$> (bibtexSwaps) <*> (loadMapping "latex-short.csv")
+        bibtexSwapTree = makeReplaceTree <$> bibtexSwaps
+        cleanSwapTree = makeReplaceTree <$> cleanSwaps
         {-fieldsfcns repls = map (sanitizeField repls) ["author","editor","institution","file"]-}
         idfields = ["author","editor"]
         procfields = ["author","editor","institution","file"]
@@ -105,6 +111,13 @@ parseChild (Split x children) = try $ do
     char x
     choice (map parseChild children)
 
+-- unsafe parsing
+unsafeParseResult :: Either ParseError a -> a
+unsafeParseResult (Left err) = error (show err)
+unsafeParseResult (Right x) = x
+
+-- build latex replacement mappings
+
 -- | Take a map (a's -> b's) and a map (a's -> c's).
 -- Make a map (b's -> c's) by joining b's and c's produced by common a's.
 linkMapping :: [(String, String)] -> [(String, String)] -> [(String, String)]
@@ -129,6 +142,29 @@ loadMapping infile = do
             v2 <- v V.!? 1
             return (cleanstring $ unpack v1, cleanstring $ unpack v2)
         cleanstring = replace "\\\\" "\\"
+
+-- clean up fields (i.e. run bibtexSwaps over them)
+updateField :: (String -> String) -> [T] -> String -> [T]
+updateField f xs field = map newEntry xs
+    where
+        newEntry old = Cons {entryType=entryType old, identifier=identifier old, fields=update $ fields old}
+        update [] = []
+        update ((a,b):ys) | a == field = (a,f b):ys
+                          | otherwise = (a,b):(update ys)
+
+parseCleaner :: Parsec String () String -> String -> String
+parseCleaner parser x = unsafeParseResult $ parse parser "" x
+
+
+
+
+
+
+
+
+
+
+
 
 {-process :: ([(String,String)] -> [(String,String)]) -> ([(String,String)] -> String) -> [T] -> [T]-}
 process :: (Map.Map String String -> Map.Map String String) -> (Map.Map String String -> String) -> [T] -> [T]
